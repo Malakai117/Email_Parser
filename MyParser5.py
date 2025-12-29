@@ -147,39 +147,6 @@ def start_progress_server(port=12345):
     threading.Thread(target=server_thread, daemon=True).start()
     time.sleep(0.2)  # Give server time to bind/listen
 
-
-def load_parsing_rules(config_file='parsing_rules.yaml', provider='pentex'):
-    """
-    Load parsing rules and sender email from YAML config file.
-    Returns: (rules_list, sender_email)
-    """
-    config_path = os.path.join(os.path.dirname(__file__), config_file)
-
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    with open(config_path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-
-    provider_config = config.get(provider)
-    if not provider_config:
-        raise ValueError(f"No configuration found for provider '{provider}' in {config_file}")
-
-    rules = config.get(provider, {}).get('rules')
-    if not rules:
-        raise ValueError(f"No rules found for provider '{provider}' in {config_file}")
-
-    sender_email = provider_config.get('email')
-    if not sender_email:
-        raise ValueError(f"No sender email found for provider '{provider}' in {config_file}")
-
-    # Basic validation
-    if not re.match(r'^[^@]+@[^@]+\.[^@]+$', sender_email):
-        raise ValueError(f"Invalid email format for provider '{provider}': {sender_email}")
-
-    return rules
-
-
 def load_provider_config(config_file='parsing_rules.yaml', provider='pentex'):
     """
     Load full provider config including email.
