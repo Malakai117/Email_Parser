@@ -349,16 +349,9 @@ def format_google_date(date_str):
         return date_str
 
 
-def message_parser(the_data, service, exclusions, batch_size=10, service_provider='pentex', config_file='parsing_rules.yaml'):
+def message_parser(the_data, service, exclusions, rules: list, batch_size=10, service_provider='pentex', config_file='parsing_rules.yaml'):
 
 
-    # Load rules once — we need the labels for dynamic columns
-    try:
-        rules = load_parsing_rules(config_file, service_provider)
-    except Exception as e:
-        logging.error(f"Failed to load parsing rules in message_parser: {e}")
-        dual_log(f"Failed to load parsing rules in message_parser: {e}")
-        rules = []
 
     # Extract just the labels to know what fields we expect
     expected_labels = [rule['label'] for rule in rules]
@@ -369,7 +362,7 @@ def message_parser(the_data, service, exclusions, batch_size=10, service_provide
     skipped_count_errors = 0
 
     def callback(request_id, response, exception):
-        nonlocal processed_count, skipped_count_filter, skipped_count_errors
+        nonlocal processed_count, skipped_count_filter, skipped_count_errors, rules
         msg_id = request_id
 
         if exception is not None:
@@ -397,7 +390,7 @@ def message_parser(the_data, service, exclusions, batch_size=10, service_provide
             snippet = response.get('snippet', '')
 
             # Parse content using existing function — returns dict with keys = rule labels
-            parsed_data = parse_email_content(snippet, body, service_provider, config_file)
+            parsed_data = parse_email_content(snippet, rules, body, service_provider)
 
             # print(json.dumps(parsed_data))
 
@@ -477,20 +470,13 @@ def message_parser(the_data, service, exclusions, batch_size=10, service_provide
     return all_data, processed_count, skipped_count_filter, skipped_count_errors
 
 
-def parse_email_content(snippet: str, body: str = '', service_provider='pentex', config_file='parsing_rules.yaml'):
+def parse_email_content(snippet: str, rules: list, body: str, service_provider: str):
     """
     Parse email content using rules loaded from external JSON config.
     """
-    try:
-        rules = load_parsing_rules(config_file, service_provider)
-    except Exception as e:
-        logging.error(f"Failed to load parsing rules: {e}")
-        dual_log(f"Failed to load parsing rules: {e}")
-        return {'account': 'Unknown'}  # Minimal fallback
-    provider = service_provider
-    extracted = {}
     text_to_search = snippet + "\n" + body
-    extracted['Provider'] = provider
+    extracted = {'Provider': service_provider}
+
     for rule in rules:
         label = rule['label']
         pattern = rule['pattern']
@@ -498,8 +484,21 @@ def parse_email_content(snippet: str, body: str = '', service_provider='pentex',
 
         match = re.search(pattern, text_to_search, re.IGNORECASE)
         if match:
-            raw_value = match.group(1)
-            clean_value = raw_value.replace(',', '')
+
+            try:
+                if match.lastgroup:
+                    raw_value = match.group(1)
+                else:
+                    raw_value = match.groups(0).strip()
+            except (IndexError, AttributeError):
+                raw_value = match.group(0).strip()
+                dual_log(f"warning: Rule {label} does not contain a capture group '(...)', using full match")
+
+            if value_type in ('float', 'int'):
+                clean_value = raw_value.replace(',', '')
+            else:
+                clean_value = raw_value.strip()
+
             try:
                 if value_type == 'float':
                     extracted[label] = float(clean_value)
@@ -689,6 +688,7 @@ def main(max_emails: int, service_provider: str, config_file:str):
 
         all_data, processed_count, skipped_count_filter, skipped_count_errors = message_parser(
             messages, service, VALID_SUBJECT_KEYWORDS,
+            rules=rules,
             batch_size=20,
             service_provider=service_provider,
             config_file=config_file
